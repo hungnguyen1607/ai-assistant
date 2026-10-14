@@ -21,6 +21,9 @@ const TOOL_LABELS: Record<string, string> = {
   write_solution_file: 'Writing solution file',
   save_problem: 'Saving to library',
   get_saved_problem: 'Checking the library',
+  list_patterns: 'Checking patterns',
+  get_pattern: 'Reading pattern',
+  save_pattern: 'Saving pattern page',
   update_profile: 'Updating your profile',
 }
 

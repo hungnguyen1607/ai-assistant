@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, type Course, type Outline, type OutlineWeek, type SolutionContent, type SolutionFile } from './api'
+import {
+  api,
+  type Course,
+  type Outline,
+  type OutlineWeek,
+  type PatternSummary,
+  type SolutionContent,
+  type SolutionFile,
+} from './api'
 import { Chat } from './Chat'
 import { Markdown } from './Markdown'
 
@@ -53,6 +61,9 @@ export default function App() {
   const [done, setDone] = useState<string[]>([])
   const [prefill, setPrefill] = useState<{ text: string; send?: boolean } | null>(null)
   const [termStart, setTermStart] = useState('')
+  const [patternList, setPatternList] = useState<PatternSummary[]>([])
+  const [seeding, setSeeding] = useState(false)
+  const [patternFilled, setPatternFilled] = useState(false)
 
   useEffect(() => {
     api
@@ -68,12 +79,17 @@ export default function App() {
     if (course) api.solutions(course).then(setSolutions).catch(() => {})
   }, [course])
 
+  const refreshPatterns = useCallback(() => {
+    if (course) api.patterns(course).then(setPatternList).catch(() => setPatternList([]))
+  }, [course])
+
   useEffect(() => {
     if (!course) return
     localStorage.setItem('tutor-course', course)
     setSessionId(null)
     setOpenFile(null)
     refreshSolutions()
+    refreshPatterns()
     setPrefill(null)
     setOutline(null)
     setOutlineError(null)
@@ -88,9 +104,29 @@ export default function App() {
     sessionFor(course)
       .then(setSessionId)
       .catch((e) => setError(e.message))
-  }, [course, refreshSolutions])
+  }, [course, refreshSolutions, refreshPatterns])
 
   const openSolution = (path: string) => api.solution(course, path).then(setOpenFile)
+
+  const openPattern = (slug: string) =>
+    api.pattern(course, slug).then((p) => {
+      setOpenFile({ name: p.name, path: `pattern:${p.slug}`, content: p.content })
+      setPatternFilled(p.filled)
+    })
+
+  const reopen = (path: string) =>
+    path.startsWith('pattern:') ? openPattern(path.slice(8)) : openSolution(path)
+
+  const seedPatterns = () => {
+    setSeeding(true)
+    api
+      .seedPatterns(course)
+      .then(refreshPatterns)
+      .catch((e) => setError(e.message))
+      .finally(() => setSeeding(false))
+  }
+
+  const ask = (text: string) => setPrefill({ text, send: true })
 
   const openPath = useRef<string | null>(null)
   useEffect(() => {
@@ -99,11 +135,19 @@ export default function App() {
 
   const onToolDone = useCallback(
     (name: string) => {
-      if (name !== 'write_solution_file' && name !== 'save_problem') return
+      if (name !== 'write_solution_file' && name !== 'save_problem' && name !== 'save_pattern') return
       refreshSolutions()
-      if (openPath.current) api.solution(course, openPath.current).then(setOpenFile)
+      refreshPatterns()
+      const path = openPath.current
+      if (!path) return
+      if (path.startsWith('pattern:'))
+        api.pattern(course, path.slice(8)).then((p) => {
+          setOpenFile({ name: p.name, path, content: p.content })
+          setPatternFilled(p.filled)
+        })
+      else api.solution(course, path).then(setOpenFile)
     },
-    [course, refreshSolutions],
+    [course, refreshSolutions, refreshPatterns],
   )
 
   const toggleDone = (week: string) => {
@@ -286,6 +330,52 @@ export default function App() {
 
         <details>
           <summary>
+            <b>Patterns</b>
+            {patternList.length > 0 &&
+              ` (${patternList.filter((p) => p.solved > 0).length}/${patternList.length} practiced)`}
+          </summary>
+          {patternList.length === 0 ? (
+            <div>
+              <small>No pattern list yet. </small>
+              <button onClick={seedPatterns} disabled={seeding}>
+                {seeding ? 'Building... (1-2 min)' : 'Build from outline'}
+              </button>
+            </div>
+          ) : (
+            <div className="pl-3">
+              <small>Number = problems solved. Click one to see its template, variations and traps.</small>
+              {Object.entries(
+                patternList.reduce<Record<string, PatternSummary[]>>((acc, p) => {
+                  const ch = p.sections.match(/^\s*(\d+)\./)?.[1] ?? 'Other'
+                  ;(acc[ch] ??= []).push(p)
+                  return acc
+                }, {}),
+              ).map(([ch, list]) => (
+                <details key={ch}>
+                  <summary>
+                    {ch === 'Other' ? 'Other' : `Chapter ${ch}`}{' '}
+                    <small>
+                      ({list.filter((p) => p.solved > 0).length}/{list.length})
+                    </small>
+                  </summary>
+                  <ul className="plain">
+                    {list.map((p) => (
+                      <li key={p.slug} title={`${p.sections} · spot it: ${p.recognize}`}>
+                        <button className="link" onClick={() => openPattern(p.slug)}>
+                          {p.name}
+                        </button>{' '}
+                        <small style={{ color: p.solved ? '#000' : '#999' }}>{p.solved}</small>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ))}
+            </div>
+          )}
+        </details>
+
+        <details>
+          <summary>
             <b>Solution files</b> ({solutions.length})
           </summary>
           {solutions.length === 0 && (
@@ -337,14 +427,31 @@ export default function App() {
       {openFile && (
         <div className="line-left w-[45%] shrink-0 overflow-y-auto px-4">
           <p>
-            <code>{openFile.path}</code> &nbsp;
-            <button className="link" onClick={() => openSolution(openFile.path)}>
+            <code>{openFile.path.startsWith('pattern:') ? 'pattern' : openFile.path}</code> &nbsp;
+            <button className="link" onClick={() => reopen(openFile.path)}>
               reload
             </button>{' '}
             <button className="link" onClick={() => setOpenFile(null)}>
               close
             </button>
           </p>
+          {openFile.path.startsWith('pattern:') && (
+            <p>
+              <button onClick={() => ask(`Drill pattern "${openFile.name}": give me a fresh problem of this type.`)}>
+                Drill this pattern
+              </button>{' '}
+              <button
+                onClick={() =>
+                  ask(
+                    `${patternFilled ? 'Redo' : 'Fill in'} the pattern page for "${openFile.name}": template, ` +
+                      'variations with how likely each is on the exam, and traps.',
+                  )
+                }
+              >
+                {patternFilled ? 'Rewrite page' : 'Fill in this pattern'}
+              </button>
+            </p>
+          )}
           <hr />
           <Markdown>{openFile.content}</Markdown>
         </div>

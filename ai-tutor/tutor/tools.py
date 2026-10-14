@@ -3,7 +3,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-from . import mathcheck, problems, profile
+from . import mathcheck, patterns, problems, profile
 from .config import course_dir, solutions_dir
 from .ocr import ocr_pages
 from .runcode import run_code
@@ -76,8 +76,22 @@ SCHEMAS = [
          "answer": {**S, "description": "final answer in plain Unicode"},
          "verified": {"type": "boolean", "description": "true only if SymPy/run_code confirmed the answer"},
          "source": {**S, "description": "where the problem came from, e.g. 'textbook/Zill.pdf p.179'"},
-         "chapter": {**S, "description": "only if it can't be read from the section number"}},
-        ["section", "number", "title", "statement", "solution", "answer", "verified"]),
+         "chapter": {**S, "description": "only if it can't be read from the section number"},
+         "pattern": {**S, "description": "slug or name of the pattern this problem mainly uses (see list_patterns); "
+                                         "a new name creates the pattern"}},
+        ["section", "number", "title", "statement", "solution", "answer", "verified", "pattern"]),
+    _fn("list_patterns",
+        "List this course's problem patterns: slug, name, sections, how to spot it, problems solved, and whether "
+        "its page is filled in.", {}, []),
+    _fn("get_pattern", "Read a pattern's full page and the problems tagged with it.", {"pattern": S}, ["pattern"]),
+    _fn("save_pattern",
+        "Create or fill in a pattern page. body is Markdown with these parts: ## Template (numbered fill-in steps), "
+        "## Variations (each: how it's twisted on tests, how to spot it, what changes, likelihood High/Medium/Low "
+        "with the evidence), ## Traps, ## Most likely on the exam. Plain Unicode math in code blocks.",
+        {"name": {**S, "description": "existing slug/name to update, or a new name"},
+         "sections": {**S, "description": "textbook sections, e.g. '2.2'"},
+         "recognize": {**S, "description": "one line: the tell in a question that says use this"},
+         "body": S}, ["name", "body"]),
     _fn("get_saved_problem", "Look up a problem already in the library (to avoid re-solving it).",
         {"section": S, "number": S}, ["section", "number"]),
     _fn("update_profile",
@@ -183,12 +197,38 @@ class Toolbox:
         path.write_text(content.rstrip() + "\n")
         return f"wrote {path}"
 
+    def t_list_patterns(self):
+        rows = patterns.list_all(self.conn, self.course)
+        return "\n".join(
+            f"{p['slug']}: {p['name']} ({p['sections']}) — spot: {p['recognize']} — {p['solved']} solved"
+            + ("" if p["filled"] else " — page EMPTY")
+            for p in rows
+        ) or "no patterns yet; pass a new pattern name to save_problem to create one"
+
+    def t_get_pattern(self, pattern):
+        p = patterns.find(self.conn, self.course, pattern)
+        return patterns.to_markdown(self.conn, p) if p else "no such pattern; call list_patterns"
+
+    def t_save_pattern(self, name, body, sections="", recognize=""):
+        p = patterns.upsert(self.conn, self.course, name, sections=sections, recognize=recognize, body=body)
+        return f"saved pattern {p['slug']} to solutions/patterns/{p['slug']}.md"
+
     def t_save_problem(self, section, number, title, statement, solution, answer="", verified=False, source="",
-                       chapter=""):
+                       chapter="", pattern=""):
         pid, created = problems.save(
             self.conn, self.course, section=section, number=number, title=title, statement=statement,
             solution=solution, answer=answer, verified=verified, source=source, chapter=chapter,
         )
+        pattern_note = ""
+        if pattern.strip():
+            pat = patterns.find(self.conn, self.course, pattern) or patterns.upsert(
+                self.conn, self.course, pattern, sections=section)
+            old = self.conn.execute("SELECT pattern_id FROM problems WHERE id = ?", (pid,)).fetchone()["pattern_id"]
+            patterns.tag(self.conn, pid, pat["id"])
+            patterns.refresh_file(self.conn, self.course, pat["id"])
+            if old and old != pat["id"]:
+                patterns.refresh_file(self.conn, self.course, old)
+            pattern_note = f"; tagged pattern {pat['slug']}" + ("" if pat["body"] else " (its page is EMPTY: fill it in with save_pattern)")
         p = problems.get(self.conn, pid)
         safe_section = re.sub(r"[^\w.\-]", "_", p["section"])
         block = problems.to_markdown(p)
@@ -206,7 +246,7 @@ class Toolbox:
         else:
             written = self.t_write_solution_file(path.name, block, p["chapter"])
         verb = "saved" if created else "updated"
-        return f"{verb} {section} #{number} in the library (id {pid}); {written}"
+        return f"{verb} {section} #{number} in the library (id {pid}); {written}{pattern_note}"
 
     def t_get_saved_problem(self, section, number):
         p = problems.find(self.conn, self.course, section, number)

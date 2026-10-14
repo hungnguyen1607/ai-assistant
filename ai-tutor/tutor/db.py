@@ -42,7 +42,26 @@ CREATE TABLE IF NOT EXISTS problems (
     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     UNIQUE (course, section, number)
 );
+CREATE TABLE IF NOT EXISTS patterns (
+    id INTEGER PRIMARY KEY,
+    course TEXT NOT NULL,
+    slug TEXT NOT NULL,               -- e.g. 'separable'
+    name TEXT NOT NULL,               -- e.g. 'Separable equations'
+    sections TEXT NOT NULL DEFAULT '',-- textbook sections where it shows up, e.g. '2.2'
+    recognize TEXT NOT NULL DEFAULT '',-- one-line tell
+    body TEXT NOT NULL DEFAULT '',    -- full page (template, variations, traps); empty until filled in
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    UNIQUE (course, slug)
+);
 """
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(problems)")}
+    if "pattern_id" not in cols:
+        conn.execute("ALTER TABLE problems ADD COLUMN pattern_id INTEGER REFERENCES patterns(id) ON DELETE SET NULL")
+        conn.commit()
 
 
 def connect() -> sqlite3.Connection:
@@ -52,6 +71,7 @@ def connect() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
 
 

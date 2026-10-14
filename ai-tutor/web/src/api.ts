@@ -26,6 +26,17 @@ export type Outline = {
   missing?: boolean
 }
 
+export type PatternSummary = {
+  id: number
+  slug: string
+  name: string
+  sections: string
+  recognize: string
+  filled: boolean
+  solved: number
+  verified: number
+}
+
 export type ProblemSummary = {
   id: number
   chapter: string
@@ -68,6 +79,13 @@ export const api = {
       json<SolutionContent>,
     ),
   outline: (course: string) => fetch(`/api/courses/${course}/outline`).then(json<Outline>),
+  patterns: (course: string) => fetch(`/api/courses/${course}/patterns`).then(json<PatternSummary[]>),
+  seedPatterns: (course: string) =>
+    fetch(`/api/courses/${course}/patterns/seed`, { method: 'POST' }).then(json<{ added: number; tagged: number }>),
+  pattern: (course: string, slug: string) =>
+    fetch(`/api/courses/${course}/patterns/${encodeURIComponent(slug)}`).then(
+      json<{ slug: string; name: string; filled: boolean; content: string }>,
+    ),
   problems: (course: string) => fetch(`/api/courses/${course}/problems`).then(json<ProblemSummary[]>),
   problem: (id: number) => fetch(`/api/problems/${id}`).then(json<Problem>),
   deleteProblem: (id: number) => fetch(`/api/problems/${id}`, { method: 'DELETE' }).then(json<{ ok: boolean }>),

@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import outline, problems, profile
+from . import outline, patterns, problems, profile
 from .agent import Tutor
 from .config import MATERIALS_DIR, ROOT, solutions_dir
 from .db import connect
@@ -65,6 +65,28 @@ def course_outline(course: str, refresh: bool = False):
         raise HTTPException(502, str(e))
 
 
+@app.get("/api/courses/{course}/patterns")
+def list_patterns(course: str):
+    return patterns.list_all(connect(), _course(course))
+
+
+@app.post("/api/courses/{course}/patterns/seed")
+def seed_patterns(course: str):
+    try:
+        return patterns.seed(connect(), _course(course))
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+
+
+@app.get("/api/courses/{course}/patterns/{slug}")
+def get_pattern(course: str, slug: str):
+    conn = connect()
+    p = patterns.find(conn, _course(course), slug)
+    if not p:
+        raise HTTPException(404, "no such pattern")
+    return {"slug": p["slug"], "name": p["name"], "filled": bool(p["body"]), "content": patterns.to_markdown(conn, p)}
+
+
 def _chapter_key(group: str) -> tuple:
     num = group.removeprefix("chapter-")
     return (0, int(num), "") if num.isdigit() else (1, 0, group)
@@ -82,6 +104,7 @@ def solutions(course: str):
             "modified": datetime.fromtimestamp(p.stat().st_mtime).isoformat(timespec="minutes"),
         }
         for p in files
+        if p.parent.name != "patterns"
     ]
     return sorted(out, key=lambda f: (_chapter_key(f["group"]), f["name"]))
 
