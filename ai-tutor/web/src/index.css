@@ -1,0 +1,59 @@
+/* layout utilities only; no preflight, so headings, lists and buttons keep browser defaults */
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+@import 'katex/dist/katex.min.css';
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #fff;
+  color: #000;
+}
+
+.link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: #00e;
+  text-decoration: underline;
+  cursor: pointer;
+  text-align: left;
+}
+
+.line-right {
+  border-right: 1px solid #ccc;
+}
+.line-left {
+  border-left: 1px solid #ccc;
+}
+.line-top {
+  border-top: 1px solid #ccc;
+}
+.line-bottom {
+  border-bottom: 1px solid #ccc;
+}
+
+ul.plain {
+  margin: 0.25em 0 0.75em;
+  padding-left: 1.25em;
+}
+
+summary {
+  cursor: pointer;
+  margin: 0.4em 0;
+}
+
+pre {
+  overflow-x: auto;
+}
+
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}

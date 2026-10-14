@@ -1,0 +1,7 @@
+# course materials stay local (copyrighted textbooks, prof slides, outlines, assignments)
+*.pdf
+*/solutions/assignments/
+
+.env
+node_modules/
+dist/
